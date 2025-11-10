@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PIO: Upload+Monitor",
+      "type": "shell",
+      "command": "pio run -t upload && pio device monitor",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+VEML7700    KEYWORD1
+VEML7700_Config  KEYWORD1
+begin       KEYWORD2
+applyConfig KEYWORD2
+readLux     KEYWORD2
+readALS     KEYWORD2
+readWHITE   KEYWORD2
+setGain     KEYWORD2
+setIntegrationTime KEYWORD2
+setCalibrationFactor KEYWORD2

@@ -1,0 +1,26 @@
+{
+  "name": "CroLibMotion",
+  "version": "0.1.0",
+  "description": "Reusable motion/packet helpers for ESP32 swarm (stepper/servo)",
+  "keywords": "esp32, motion, servo, stepper, packet, crc16, time-sync",
+  "authors": [
+    {
+      "name": "yuttapichai leelai",
+      "url": ""
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": [
+    "espressif32",
+    "native"
+  ],
+  "export": {
+    "exclude": [
+      "examples"
+    ]
+  },
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src"
+  }
+}
