@@ -19,7 +19,7 @@ static MotorPreset M2_PRESET{100, 360, 1};
 // -------------------------- Pattern 1 --------------------------
 // LED
 static const char *P1_LED[6] = {
-    "O O O F F X F O O O F O F O F F O O F", // Node1
+    "Y F Y F Y X F O O O F O F O F F O O F", // Node1
     "F O O O F F X F O O F F O F O F O F F", // Node2
     "F F O O O F F X F O O F F O F O F O O", // Node3
     "F F F O O O F F X F O O F F O F O F O", // Node4
@@ -48,7 +48,7 @@ static const char *P1_M2[6] = {
 // -------------------------- Pattern 2 --------------------------
 // LED
 static const char *P2_LED[6] = {
-    "O O O O O X O O O O O O O O O O O O O", // Node1
+    "O O O O Y X Y O O O O O O O O O O O O", // Node1
     "O O O O O O X F O O F F O F O F O F F", // Node2
     "F F O O O F F X F O O F F O F O F O O", // Node3
     "F F F O O O F F X F O O F F O F O F O", // Node4
@@ -74,12 +74,44 @@ static const char *P2_M2[6] = {
     "F X F F F F F X X F F X F X F F X X F"  // Node6
 };
 
+// -------------------------- Pattern 3 --------------------------
+// LED
+static const char *P3_LED[6] = {
+    "Y Y O O Y X Y O O O O O O O O O O O O", // Node1
+    "O O O O O O X F O O F F O F O F O F F", // Node2
+    "F F O O O F F X F O O F F O F O F O O", // Node3
+    "F F F O O O F F X F O O F F O F O F O", // Node4
+    "F F F F O O O F F X F O O F F O F O F", // Node5
+    "F F F F F O O O F F X F O O F F O F O"  // Node6
+};
+// M1
+static const char *P3_M1[6] = {
+    "F F O O F F F O O F F O F O F F O O F", // Node1
+    "F F F O O F F F O O F F F O F O F O F", // Node2
+    "F F F F O O F F F O O F F F O F O F F", // Node3
+    "F F F F F F O O F F F O O F F F O F O", // Node4
+    "F F F F O O F F F O O F F F O F O F F", // Node5
+    "F F O O O F F F O O F F F O F O F F F"  // Node6
+};
+// M2
+static const char *P3_M2[6] = {
+    "F X F F F F F X X F F X F X F F X X F", // Node1
+    "F X F F F F F X X F F X F X F F X X F", // Node2
+    "F X F F F F F X X F F X F X F F X X F", // Node3
+    "F X F F F F F X X F F X F X F F X X F", // Node4
+    "F X F F F F F X X F F X F X F F X X F", // Node5
+    "F X F F F F F X X F F X F X F F X X F"  // Node6
+};
+
+
+
+
 extern uint8_t sequence_selection; // 1 or 2
 
 // LIGHT SENSOR CONFIG
-#define LIGHT_SENSOR_THRESHOLD_LUX_MIN 50.0f // very dark
-#define LIGHT_SENSOR_THRESHOLD_LUX_MID 300.0f // weak light
-#define LIGHT_SENSOR_THRESHOLD_LUX_MAX 1000.0f // strong light
+#define LIGHT_SENSOR_THRESHOLD_LUX_MIN 1000.0f // very dark
+#define LIGHT_SENSOR_THRESHOLD_LUX_MID 5000.0f // weak light
+#define LIGHT_SENSOR_THRESHOLD_LUX_MAX 6000.0f // strong light
 
 // NUMBER OF SEQUENCES PER PATTERN
 #define PATTERN_NUM_SEQUENCES 19

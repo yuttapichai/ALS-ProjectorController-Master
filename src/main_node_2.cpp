@@ -16,7 +16,6 @@ using namespace cro;
 #define PWM_RES 12
 #define PWM_FREQ 5000
 
-
 #define M1_STEP_PIN 5
 #define M1_DIR_PIN 6
 #define M1_EN_PIN 7
@@ -28,9 +27,7 @@ using namespace cro;
 #define M1_LIMIT_SWITCH_PIN 1
 #define M2_LIMIT_SWITCH_PIN 2
 
-
 #define PULLEY_RATIO (18.34 / 10.7) // mm.
-
 
 static const uint16_t FULL_STEPS_PER_REV = 200;
 static const uint16_t MICROSTEPS = 8;
@@ -190,16 +187,32 @@ static void taskRxProcess(void *)
     if (xQueueReceive(rxQ, &it, portMAX_DELAY) != pdTRUE)
       continue;
 
+    // if ((it.f.bitmask & (1u << idx)) == 0)
+    // {
+    //   LED_MODE = LED_OFF;
+    //   LED_MODE_UPDATED = true;
+    //   continue;
+    // }
     if ((it.f.bitmask & (1u << idx)) == 0)
     {
-      LED_MODE = LED_OFF;
-      LED_MODE_UPDATED = true;
+      if (LED_MODE != LED_OFF)
+      {
+        LED_MODE = LED_OFF;
+        LED_MODE_UPDATED = true;
+      }
       continue;
     }
 
+    // const NodeData &nd = it.f.node[idx];
+
     const NodeData &nd = it.f.node[idx];
-    LED_MODE = nd.led;
-    LED_MODE_UPDATED = true;
+    // LED_MODE = nd.led;
+    // LED_MODE_UPDATED = true;
+    if (nd.led != LED_MODE)
+    {
+      LED_MODE = nd.led;
+      LED_MODE_UPDATED = true;
+    }
 
     const MotorData &m1 = nd.m1;
     const MotorData &m2 = nd.m2;
@@ -227,7 +240,7 @@ static void taskRxProcess(void *)
     xQueueSend(motorQ1, &c1, pdMS_TO_TICKS(10));
     xQueueSend(motorQ2, &c2, pdMS_TO_TICKS(10));
 
-//wake up motor tasks
+    // wake up motor tasks
     if (hMotor1)
       xTaskNotifyGive(hMotor1);
     if (hMotor2)
@@ -242,7 +255,7 @@ static void taskHeartbeat(void *)
   uint16_t value = 0;
   bool fadeUp = true;
   uint8_t lastMode = 0xFF;
-
+  uint8_t fast_dim_step = 0;
   ledcSetup(PWM_CH, PWM_FREQ, PWM_RES);
   ledcAttachPin(PWM_PIN, PWM_CH);
   ledcWrite(PWM_CH, 0);
@@ -271,6 +284,7 @@ static void taskHeartbeat(void *)
       LED_MODE_UPDATED = false;
       fadeUp = true;
       value = (mode == LED_ON) ? PWM_MAX : 0;
+      fast_dim_step = 0;
       ledcWrite(PWM_CH, value);
       Serial.printf("[Node%u] LED -> %s\n", NODE_ID, ledModeName(mode));
     }
@@ -316,28 +330,48 @@ static void taskHeartbeat(void *)
     }
     case LED_DIM_FAST:
     {
-      uint16_t s = stepCalc(T_FAST_MS, DELAY_FAST_MS);
+      // uint16_t s = stepCalc(T_FAST_MS, DELAY_FAST_MS);
+
+      if (fast_dim_step < 30)
+      {
+        value = PWM_MAX;
+        ++fast_dim_step;
+      }
+      else if (fast_dim_step < 60)
+      {
+        value = 0;
+        ++fast_dim_step;
+      }
+      else if (fast_dim_step < 90)
+      {
+        value = PWM_MAX;
+        ++fast_dim_step;
+      }
+      else if (fast_dim_step < 120)
+      {
+        value = 0;
+        ++fast_dim_step;
+      }
+      else if (fast_dim_step < 140)
+      {
+        value = PWM_MAX;
+        ++fast_dim_step;
+      }
+      else if (fast_dim_step <= 180)
+      {
+        value = 0;
+        ++fast_dim_step;
+      }
+      else if (fast_dim_step > 180)
+      {
+        value = PWM_MAX;
+      }
+      // else
+      // {
+      //   value = 0;
+      //   fast_dim_step = 0;
+      // }
       ledcWrite(PWM_CH, value);
-      if (fadeUp)
-      {
-        if (value + s >= PWM_MAX)
-        {
-          value = PWM_MAX;
-          fadeUp = false;
-        }
-        else
-          value += s;
-      }
-      else
-      {
-        if (value <= s)
-        {
-          value = 0;
-          fadeUp = true;
-        }
-        else
-          value -= s;
-      }
       vTaskDelay(pdMS_TO_TICKS(DELAY_FAST_MS));
       break;
     }
@@ -530,7 +564,7 @@ static void taskMotor2(void *)
       continue;
     }
 
-    //mode wave
+    // mode wave
     if (R.cur_dir == 2)
     {
       const uint32_t halfUs_wave = 2000; // = 250 pps
@@ -658,7 +692,7 @@ void setup()
   // pinMode(M2_LIMIT_SWITCH_PIN, INPUT_PULLUP);
 
   // ====== ADC config for M2 analog limit ======
-  analogReadResolution(12);                               // 12 bits
+  analogReadResolution(12); // 12 bits
   analogSetPinAttenuation(M2_LIMIT_SWITCH_PIN, ADC_11db);
   pinMode(M2_LIMIT_SWITCH_PIN, INPUT);
 

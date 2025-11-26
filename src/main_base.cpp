@@ -46,7 +46,7 @@ static char pickOXF(const char *s, uint8_t k)
   for (; *s; ++s)
   {
     char c = *s;
-    if (c == 'O' || c == 'X' || c == 'F')
+    if (c == 'O' || c == 'X' || c == 'Y' || c == 'F')
     {
       if (++seen == k)
         return c;
@@ -100,6 +100,8 @@ static inline cro::LedMode mapLedOXF(char c)
     return cro::LED_ON;
   if (c == 'X')
     return cro::LED_DIM_SLOW;
+  if (c == 'Y')
+    return cro::LED_DIM_FAST;
   return cro::LED_OFF; // 'F'
 }
 
@@ -155,6 +157,32 @@ static cro::MotionFrame buildPattern2(uint8_t seq /*1..19*/)
   return f;
 }
 
+// build pattern #3 frame
+static cro::MotionFrame buildPattern3(uint8_t seq /*1..19*/)
+{
+  seq = clampU8(seq, 1, PATTERN_NUM_SEQUENCES);
+
+  cro::MotionFrame f = cro::makeFrame(/*bitmask*/ 0x3F, /*motorType*/ 1); // Stepper
+
+  // LED per-node
+  for (int n = 0; n < 6; ++n)
+  {
+    char cLED = pickOXF(P3_LED[n], seq);
+    cro::setNodeLed(f, n, mapLedOXF(cLED));
+  }
+
+  // M1/M2 per-node
+  for (int n = 0; n < 6; ++n)
+  {
+    char c1 = pickOXF(P3_M1[n], seq);
+    char c2 = pickOXF(P3_M2[n], seq);
+    applyMotorOXF(f, n, 0, c1, M1_PRESET);
+    applyMotorOXF(f, n, 1, c2, M2_PRESET);
+  }
+
+  return f;
+}
+
 // ===================== Command Task =====================
 static void taskCommand(void *pv)
 {
@@ -177,6 +205,13 @@ static void taskCommand(void *pv)
       bool ok = Base.sendFrame(frame);
       Serial.printf("[Base] send P#1 seq=%u -> %s\n", seq, ok ? "OK" : "FAIL");
     }
+    else if (sequence_selection == 3)
+    {
+      auto frame = buildPattern3(seq);
+      cro::printFrame(frame);
+      bool ok = Base.sendFrame(frame);
+      Serial.printf("[Base] send P#3 seq=%u -> %s\n", seq, ok ? "OK" : "FAIL");
+    }
     vTaskDelay(pdMS_TO_TICKS(PATTERN_TIMEFRAME_MS));
   }
 }
@@ -190,18 +225,18 @@ static void taskSensor(void *pv)
     if (sensor.readLux(lux))
     {
       Serial.printf("[Base] Ambient Light: %.2f lux\n", lux);
-      // if (lux < LIGHT_SENSOR_THRESHOLD_LUX_MIN)
-      // {
-      //   // sequence_selection = 1;
-      // }
-      // else 
-      if (lux < LIGHT_SENSOR_THRESHOLD_LUX_MID)
+      if (lux <= LIGHT_SENSOR_THRESHOLD_LUX_MIN)
       {
         sequence_selection = 1;
       }
-      else if (lux > LIGHT_SENSOR_THRESHOLD_LUX_MAX)
+      else 
+      if (lux <= LIGHT_SENSOR_THRESHOLD_LUX_MID)
       {
         sequence_selection = 2;
+      }
+      else if (lux > LIGHT_SENSOR_THRESHOLD_LUX_MAX)
+      {
+        sequence_selection = 3;
       }
     }
     else
@@ -237,7 +272,7 @@ void setup()
 
   Serial.println("VEML7700 init OK");
 
-  Serial.println("\n=== CroMotion Base (Pattern #1) ===");
+  Serial.println("\n=== Base (Active) ===");
 
   Base.begin(1);
   esp_now_register_send_cb(onSendCb);
