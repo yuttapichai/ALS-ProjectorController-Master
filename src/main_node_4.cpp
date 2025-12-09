@@ -69,6 +69,14 @@ static TaskHandle_t hMotor2 = nullptr;
 static volatile uint8_t LED_MODE = 0; // 0=OFF,1=ON,2=DIM_SLOW,3=DIM_FAST
 static volatile bool LED_MODE_UPDATED = false;
 
+// ---------- M1 runtime position & home state ----------
+static volatile int32_t g_M1_pos_steps = 0;      // logical position of M1 in microsteps
+static volatile bool g_M1_home_latched = false;  // set when M1 hits home while running
+static bool g_M1_home_prev = false;              // last home state for edge detect
+
+// (Optional) M2 position if needed later
+static volatile int32_t g_M2_pos_steps = 0;
+
 // ---------- Utils ----------
 static const char *ledModeName(uint8_t v)
 {
@@ -187,12 +195,6 @@ static void taskRxProcess(void *)
     if (xQueueReceive(rxQ, &it, portMAX_DELAY) != pdTRUE)
       continue;
 
-    // if ((it.f.bitmask & (1u << idx)) == 0)
-    // {
-    //   LED_MODE = LED_OFF;
-    //   LED_MODE_UPDATED = true;
-    //   continue;
-    // }
     if ((it.f.bitmask & (1u << idx)) == 0)
     {
       if (LED_MODE != LED_OFF)
@@ -203,11 +205,8 @@ static void taskRxProcess(void *)
       continue;
     }
 
-    // const NodeData &nd = it.f.node[idx];
-
     const NodeData &nd = it.f.node[idx];
-    // LED_MODE = nd.led;
-    // LED_MODE_UPDATED = true;
+
     if (nd.led != LED_MODE)
     {
       LED_MODE = nd.led;
@@ -330,8 +329,6 @@ static void taskHeartbeat(void *)
     }
     case LED_DIM_FAST:
     {
-      // uint16_t s = stepCalc(T_FAST_MS, DELAY_FAST_MS);
-
       if (fast_dim_step < 30)
       {
         value = PWM_MAX;
@@ -366,11 +363,6 @@ static void taskHeartbeat(void *)
       {
         value = PWM_MAX;
       }
-      // else
-      // {
-      //   value = 0;
-      //   fast_dim_step = 0;
-      // }
       ledcWrite(PWM_CH, value);
       vTaskDelay(pdMS_TO_TICKS(DELAY_FAST_MS));
       break;
@@ -408,7 +400,6 @@ static void applyCmd(MotorRun &r, const MotorCmd &cmd)
   r.enabled = true;
   // cmd.md.dir [0,..,2]: 0=CW,1=CCW,2=Toggle
   r.cur_dir = cmd.md.dir;
-  // r.cur_dir = (cmd.md.dir ? 1 : 0);
 }
 
 static void applyCmd_M2(MotorRun &r, const MotorCmd &cmd)
@@ -438,13 +429,58 @@ static void applyCmd_M2(MotorRun &r, const MotorCmd &cmd)
   r.cur_dir = idx;
 }
 
+// ---------- Pulse generator with M1 home check ----------
 static void pulseChunk(uint8_t m_number, uint8_t stepPin, uint8_t dirPin, int8_t enPin,
                        uint8_t dir, uint32_t n, uint32_t halfUs)
 {
+  // M1: normal CW/CCW with home detect and position tracking
   if (m_number == 1)
   {
+    // For M1: dir==0 => CW, dir==1 => CCW (mapping kept same as previous code)
     digitalWrite(dirPin, dir ? LOW : HIGH); // HIGH CW, LOW CCW
+
+    if (enPin >= 0)
+      digitalWrite((uint8_t)enPin, LOW); // enable (active-low)
+
+    const uint32_t YIELD_EVERY = 256;
+    bool homePrev = g_M1_home_prev;
+
+    for (uint32_t i = 0; i < n; ++i)
+    {
+      digitalWrite(stepPin, HIGH);
+      ets_delay_us(halfUs);
+      digitalWrite(stepPin, LOW);
+      ets_delay_us(halfUs);
+
+      // Update logical position: CW=+1, CCW=-1
+      if (dir == 0)
+        g_M1_pos_steps++;
+      else
+        g_M1_pos_steps--;
+
+      // Home switch is active-low
+      bool homeNow = (digitalRead(M1_LIMIT_SWITCH_PIN) == LOW);
+      if (!homePrev && homeNow)
+      {
+        // Just entered home -> latch and reset position
+        g_M1_home_latched = true;
+        g_M1_pos_steps = 0;
+        homePrev = homeNow;
+        break;
+      }
+      homePrev = homeNow;
+
+      if ((i % YIELD_EVERY) == 0)
+        vTaskDelay(0);
+    }
+
+    g_M1_home_prev = homePrev;
+
+    if (enPin >= 0)
+      digitalWrite((uint8_t)enPin, HIGH); // disable (active-low)
+    return;
   }
+  // M2 with special WAVE mode
   else if (m_number == 2)
   {
     if (m_number == 2 && dir == 2)
@@ -481,10 +517,12 @@ static void pulseChunk(uint8_t m_number, uint8_t stepPin, uint8_t dirPin, int8_t
     }
     else
     {
+      // For M2: dir==0 => CW, dir==1 => CCW
       digitalWrite(dirPin, dir ? HIGH : LOW); // LOW CW, HIGH CCW
     }
   }
 
+  // Generic chunk (used by M2 CW/CCW)
   if (enPin >= 0)
     digitalWrite((uint8_t)enPin, LOW); // enable (active-low)
   const uint32_t YIELD_EVERY = 256;
@@ -494,6 +532,16 @@ static void pulseChunk(uint8_t m_number, uint8_t stepPin, uint8_t dirPin, int8_t
     ets_delay_us(halfUs);
     digitalWrite(stepPin, LOW);
     ets_delay_us(halfUs);
+
+    if (m_number == 2)
+    {
+      // Optional: track M2 position if needed (similar to M1)
+      if (dir == 0)
+        g_M2_pos_steps++;
+      else
+        g_M2_pos_steps--;
+    }
+
     if ((i % YIELD_EVERY) == 0)
       vTaskDelay(0);
   }
@@ -504,12 +552,11 @@ static void pulseChunk(uint8_t m_number, uint8_t stepPin, uint8_t dirPin, int8_t
 // M1
 static void taskMotor1(void *)
 {
-
   MotorRun R;
   MotorCmd cmd;
+
   for (;;)
   {
-
     while (xQueueReceive(motorQ1, &cmd, 0) == pdTRUE)
       applyCmd(R, cmd);
 
@@ -527,6 +574,9 @@ static void taskMotor1(void *)
     if (chunk > 512)
       chunk = 512;
 
+    // Remember previous home latch state (should normally be false)
+    bool wasHomeLatched = g_M1_home_latched;
+
     pulseChunk(1, M1_STEP_PIN, M1_DIR_PIN,
 #ifdef M1_EN_PIN
                M1_EN_PIN,
@@ -535,6 +585,28 @@ static void taskMotor1(void *)
 #endif
                d, chunk, halfUs);
 
+    // If M1 hit home during this chunk, stop immediately and clear queue
+    if (g_M1_home_latched && !wasHomeLatched)
+    {
+      Serial.printf("[Node%u][M1] HOME hit while running -> stop & reset pos=0\n", NODE_ID);
+
+      R.pending[0] = R.pending[1] = 0;
+      R.enabled = false;
+
+      // Flush any pending commands in the queue
+      while (xQueueReceive(motorQ1, &cmd, 0) == pdTRUE)
+      {
+        // discard commands on HOME hit
+      }
+
+      // Clear latch after handling
+      g_M1_home_latched = false;
+
+      // Go wait for next command
+      continue;
+    }
+
+    // Normal case: no home hit, reduce pending by executed chunk
     R.pending[d] -= chunk;
 
     while (xQueueReceive(motorQ1, &cmd, 0) == pdTRUE)
@@ -568,8 +640,6 @@ static void taskMotor2(void *)
     if (R.cur_dir == 2)
     {
       const uint32_t halfUs_wave = 2000; // = 250 pps
-      const uint32_t pulseCW = 200;
-      const uint32_t pulseCCW = 200;
 
       pulseChunk(2, M2_STEP_PIN, M2_DIR_PIN,
 #ifdef M2_EN_PIN
@@ -648,6 +718,11 @@ static void HomeSearch()
   }
   Serial.printf("[Node%u] M1 Home Position Found!\n", NODE_ID);
 
+  // After homing M1, reset logical position and home state
+  g_M1_pos_steps = 0;
+  g_M1_home_latched = false;
+  g_M1_home_prev = (digitalRead(M1_LIMIT_SWITCH_PIN) == LOW);
+
   // ---------- M2 ----------
   digitalWrite(M2_DIR_PIN, HIGH);
   while (isM2Active())
@@ -667,6 +742,9 @@ static void HomeSearch()
     yield();
   }
   Serial.printf("[Node%u] M2 Home Position Found! (analog)\n", NODE_ID);
+
+  // Optional: reset M2 logical position
+  g_M2_pos_steps = 0;
 }
 
 // ---------- setup / loop ----------
@@ -689,14 +767,19 @@ void setup()
   digitalWrite(M2_EN_PIN, HIGH);
 #endif
   pinMode(M1_LIMIT_SWITCH_PIN, INPUT_PULLUP);
-  // pinMode(M2_LIMIT_SWITCH_PIN, INPUT_PULLUP);
 
   // ====== ADC config for M2 analog limit ======
   analogReadResolution(12); // 12 bits
   analogSetPinAttenuation(M2_LIMIT_SWITCH_PIN, ADC_11db);
   pinMode(M2_LIMIT_SWITCH_PIN, INPUT);
 
-  // Perform home search for M1
+  // Init logical positions & home flags
+  g_M1_pos_steps = 0;
+  g_M1_home_latched = false;
+  g_M1_home_prev = (digitalRead(M1_LIMIT_SWITCH_PIN) == LOW);
+  g_M2_pos_steps = 0;
+
+  // Perform home search for M1 & M2
   Serial.printf("[Node%u] Performing Home Search for M1...\n", NODE_ID);
   HomeSearch();
 
